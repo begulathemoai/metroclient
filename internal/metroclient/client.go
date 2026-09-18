@@ -149,7 +149,7 @@ func (c *Client) readPump() {
 	}*/
 	c.Conn.SetPingHandler(func(string) error {
 		c.Logger.Debug("Received ping; now ponging")
-		c.Conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(WriteTimeout))
+		c.Conn.WriteControl(websocket.PongMessage, nil, time.Now().Add(WriteTimeout))
 		if err := c.Conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
 			//s.logger.Debug("Failed to set read deadline in pong handler", zap.String("client_id", c.clientID()), zap.Error(err))
 		}
