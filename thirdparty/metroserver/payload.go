@@ -3,7 +3,7 @@ package metroserver
 import (
 	"fmt"
 
-	pb "github.com/begulathemoai/metroserverclient/proto"
+	pb "github.com/begulathemoai/metroclient/proto"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -84,6 +84,38 @@ func fromProtoMessage(msgType string, data []byte) (any, error) {
 			return nil, err
 		}
 		return &RejectJoinPayload{UserID: pbb.UserId, Reason: pbb.Reason}, nil
+	case MsgTypeSyncPlayback:
+		if err := validatePlaybackActionCardinality(data); err != nil {
+			return nil, err
+		}
+		var pbMsg pb.PlaybackActionPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return nil, err
+		}
+		payload := &PlaybackActionPayload{
+			Action:               pbMsg.Action,
+			TrackID:              pbMsg.TrackId,
+			Position:             pbMsg.Position,
+			InsertNext:           pbMsg.InsertNext,
+			QueueTitle:           pbMsg.QueueTitle,
+			Volume:               float64(pbMsg.Volume),
+			ServerTime:           pbMsg.ServerTime,
+			Revision:             pbMsg.Revision,
+			CapturedAtServerTime: pbMsg.CapturedAtServerTime,
+		}
+		if pbMsg.TrackInfo != nil {
+			payload.TrackInfo = protoToTrackInfo(pbMsg.TrackInfo)
+		}
+		if pbMsg.Queue != nil {
+			if len(pbMsg.Queue) > MaxQueueInputSize {
+				return nil, fmt.Errorf("queue has more than %d entries", MaxQueueInputSize)
+			}
+			payload.Queue = make([]TrackInfo, len(pbMsg.Queue))
+			for i, track := range pbMsg.Queue {
+				payload.Queue[i] = *protoToTrackInfo(track)
+			}
+		}
+		return payload, nil
 	case MsgTypePlaybackAction:
 		if err := validatePlaybackActionCardinality(data); err != nil {
 			return nil, err
@@ -289,6 +321,12 @@ func DecodePayload(payloadBytes []byte, msgType string, target interface{}) erro
 		p, ok := payload.(*ServerCapabilitiesPayload)
 		if !ok {
 			return fmt.Errorf("payload type mismatch: expected ServerCapabilitiesPayload, got %T", payload)
+		}
+		*t = *p
+	case *UserLeftPayload:
+		p, ok := payload.(*UserLeftPayload)
+		if !ok {
+			return fmt.Errorf("payload type mismatch: expected UserLeftPayload, got %T", payload)
 		}
 		*t = *p
 	default:

@@ -1,12 +1,13 @@
-package metroclient
+package client
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/begulathemoai/metroserverclient/metroserver"
+	"github.com/begulathemoai/metroclient/thirdparty/metroserver"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 	//"go.uber.org/zap"
@@ -29,14 +30,16 @@ type Client struct {
 	codec              *metroserver.MessageCodec
 	Logger             *zap.Logger
 	CompressionEnabled bool
+	QueueTitle         string
+	awaits             map[chan int]string
 }
 
 func NewClient(url string, logger *zap.Logger) (c *Client, err error) {
-	//header := http.Header{}
-	//header.Set("Origin", "https://metroserverx.begulathemoai.dev")
 
 	logger.Info("Connecting to remote server")
-	connection, r, err := websocket.DefaultDialer.Dial(url, nil) //DialContext(context.Background(), url, header)
+	h := http.Header{}
+	h.Add("User-Agent", "dev.begulathemoai.metroclient")
+	connection, r, err := websocket.DefaultDialer.Dial(url, h)
 	if err != nil {
 		logger.Error("Connection failed")
 		return nil, fmt.Errorf("when dialing url : %w", err)
@@ -72,6 +75,8 @@ func (c *Client) WriteMessage(in any) (err error) {
 		T = metroserver.MsgTypeJoinRoom
 	case *metroserver.ClientCapabilitiesPayload:
 		T = metroserver.MsgTypeClientCapabilities
+	case *metroserver.LeaveRoomPayload:
+		T = metroserver.MsgTypeLeaveRoom
 	default:
 		c.Logger.Error("couldn't send unhandled message type")
 		return fmt.Errorf("couldn't send unhandled message type %T", in)
@@ -100,7 +105,23 @@ func (c *Client) JoinRoom(code string) (err error) {
 	return nil
 }
 
-// shamelessly stolen from metroserver by nyxiereal
+func (c *Client) LeaveRoom() (err error) {
+	c.Logger.Info("Attempting to leave room")
+	if c.CurrentRoom == "" {
+		return fmt.Errorf("when leaving room : this client isn't in any room")
+	}
+
+	c.WriteMessage(&metroserver.LeaveRoomPayload{})
+	c.QueueTitle = ""
+	c.CurrentRoom = ""
+	c.RoomState = nil
+	c.UserID = ""
+	c.SessionToken.Store("")
+	c.Logger.Info("Left room")
+	return nil
+}
+
+// shamelessly stolen from github.com/MetrolistGroup/metroserver by nyxiereal
 func (c *Client) writePump() {
 	ticker := time.NewTicker(PingInterval)
 	defer func() {
@@ -196,7 +217,11 @@ func (c *Client) handleMessage(message []byte) {
 		c.Logger.Info("Received no message type")
 		return
 	}
-
+	for ch, t := range c.awaits {
+		if t == msgType {
+			ch <- 1
+		}
+	}
 	switch msgType {
 	case metroserver.MsgTypeError:
 		i := &metroserver.ErrorPayload{}
@@ -229,6 +254,55 @@ func (c *Client) handleMessage(message []byte) {
 		c.Logger.Info("Got server capabilities", zap.Bool("supports_compression", i.SupportsCompression), zap.Bool("supports_protobuf", i.SupportsProtobuf), zap.String("server_version", i.ServerVersion))
 	case metroserver.MsgTypeSyncPlayback:
 		c.Logger.Debug("Received Sync Message")
+		i := &metroserver.PlaybackActionPayload{}
+		err := metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeSyncPlayback, i)
+		if err != nil {
+			c.Logger.Error("error while decoding", zap.Error(err))
+			return
+		}
+		c.RoomState.Revision = i.Revision
+		c.QueueTitle = i.QueueTitle
+
+		switch i.Action {
+		case "sync_queue":
+			c.RoomState.CurrentTrack = i.TrackInfo
+			c.RoomState.Position = i.Position
+			c.Logger.Info("Received queue update")
+		case "play":
+			c.Logger.Debug("Received playback update")
+			if !c.RoomState.IsPlaying {
+				c.Logger.Info("Resumed playback")
+			}
+			c.RoomState.Position = i.Position
+			c.RoomState.IsPlaying = true
+
+		case "change_track":
+			c.RoomState.CurrentTrack = i.TrackInfo
+			c.RoomState.Position = i.Position
+			c.Logger.Info("Changed track", zap.String("new_track", i.TrackInfo.Title))
+		case "pause":
+			c.Logger.Info("Paused playback")
+			c.RoomState.IsPlaying = false
+		default:
+			c.Logger.Info("Received playback action of unhandled type", zap.String("type", i.Action))
+		}
+	case metroserver.MsgTypeUserLeft:
+		c.Logger.Debug("Received user_left")
+		i := &metroserver.UserLeftPayload{}
+		err := metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeSyncPlayback, i)
+		if err != nil {
+			c.Logger.Error("error while decoding", zap.Error(err))
+			return
+		}
+		idx := 0
+		for id, u := range c.RoomState.Users {
+			if u.UserID == i.UserID {
+				idx = id
+			}
+		}
+		// we remove the user that just left
+		c.RoomState.Users[idx] = c.RoomState.Users[len(c.RoomState.Users)-1]
+		c.RoomState.Users = c.RoomState.Users[:len(c.RoomState.Users)-1]
 	default:
 		c.Logger.Info("Received message of unhandled type", zap.String("type", msgType))
 	}
@@ -236,6 +310,23 @@ func (c *Client) handleMessage(message []byte) {
 
 }
 
+// returns true if the message was received first, false if the timeout occured first
+func (c *Client) AwaitMessageOrTimeout(msg string, timeout time.Duration) bool {
+	nch := make(chan int)
+	tch := time.After(timeout)
+
+	select {
+	case <-nch:
+		return true
+	case <-tch:
+		return false
+	}
+}
+
 func (c *Client) Close() {
-	c.Conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye......"), time.Now().Add(WriteTimeout))
+	if c.CurrentRoom != "" {
+		c.LeaveRoom()
+		c.AwaitMessageOrTimeout(metroserver.MsgTypeUserLeft, time.Second)
+	}
+	defer c.Conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye......"), time.Now().Add(WriteTimeout))
 }

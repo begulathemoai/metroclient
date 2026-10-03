@@ -1,4 +1,4 @@
-module github.com/begulathemoai/metroserverclient
+module github.com/begulathemoai/metroclient
 
 go 1.27.0
 

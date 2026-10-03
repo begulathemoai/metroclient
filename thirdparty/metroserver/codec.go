@@ -8,7 +8,7 @@ import (
 	"io"
 	"sync/atomic"
 
-	pb "github.com/begulathemoai/metroserverclient/proto"
+	pb "github.com/begulathemoai/metroclient/proto"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )
@@ -159,6 +159,8 @@ func decompressData(data []byte) ([]byte, error) {
 func toProtoMessage(payload interface{}) (proto.Message, error) {
 	switch p := payload.(type) {
 	// Pointer types (from pending actions)
+	case *LeaveRoomPayload:
+		return &pb.LeaveRoomPayload{}, nil
 	case *CreateRoomPayload:
 		return &pb.CreateRoomPayload{Username: p.Username}, nil
 	case *JoinRoomPayload:
@@ -301,6 +303,8 @@ func toProtoMessage(payload interface{}) (proto.Message, error) {
 		return &pb.SuggestionRejectedPayload{SuggestionId: p.SuggestionID, Reason: p.Reason}, nil
 
 	// Value types (from sendMessage)
+	case LeaveRoomPayload:
+		return &pb.LeaveRoomPayload{}, nil
 	case RoomCreatedPayload:
 		return &pb.RoomCreatedPayload{
 			RoomCode:     p.RoomCode,
