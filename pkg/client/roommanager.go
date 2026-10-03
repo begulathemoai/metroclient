@@ -1,0 +1,112 @@
+package client
+
+import (
+	"fmt"
+
+	"github.com/begulathemoai/metroclient/thirdparty/metroserver"
+	"go.uber.org/zap"
+)
+
+type RoomState struct {
+	PendingJoin         string
+	RoomCode            string
+	HostID              string
+	Users               []metroserver.UserInfo
+	Queue               []metroserver.TrackInfo
+	QueueTitle          string
+	CurrentTrack        *metroserver.TrackInfo
+	IsPlaying           bool
+	IsHost              bool
+	Position            int64
+	LastUpdate          int64
+	Volume              float64
+	Revision            uint64
+	PendingJoinRequests map[string]string
+}
+
+func (r *RoomState) UpdateFromMetroserverRoomState(msrs *metroserver.RoomState) {
+	r.RoomCode = msrs.RoomCode
+	r.HostID = msrs.HostID
+	r.Users = msrs.Users
+	r.Queue = msrs.Queue
+	r.CurrentTrack = msrs.CurrentTrack
+	r.IsPlaying = msrs.IsPlaying
+	r.Position = msrs.Position
+	r.LastUpdate = msrs.LastUpdate
+	r.Volume = msrs.Volume
+	r.Revision = msrs.Revision
+}
+
+func (r *RoomState) ToMetroserverRoomState() (msrs *metroserver.RoomState) {
+	msrs = &metroserver.RoomState{
+		RoomCode:     r.RoomCode,
+		HostID:       r.HostID,
+		Users:        r.Users,
+		Queue:        r.Queue,
+		CurrentTrack: r.CurrentTrack,
+		IsPlaying:    r.IsPlaying,
+		Position:     r.Position,
+		LastUpdate:   r.LastUpdate,
+		Volume:       r.Volume,
+		Revision:     r.Revision,
+	}
+	return
+}
+
+func (c *Client) AcceptJoinRequest(UserID string) (err error) {
+	_, ok := c.RoomState.PendingJoinRequests[UserID]
+	if !ok {
+		return fmt.Errorf("when accepting join request : no user with this id has requested to join")
+	}
+
+	c.Logger.Info("Accepting join request", zap.String("UserID", UserID), zap.String("Username", c.RoomState.PendingJoinRequests[UserID]))
+	err = c.WriteMessage(&metroserver.ApproveJoinPayload{UserID: UserID})
+	if err != nil {
+		return fmt.Errorf("when accepting join request : %w", err)
+	}
+	delete(c.RoomState.PendingJoinRequests, UserID)
+	return nil
+}
+
+func (c *Client) JoinRoom(code string) (err error) {
+	if c.RoomState.RoomCode != "" || c.RoomState.PendingJoin != "" {
+		return fmt.Errorf("when joining room : cannot join room if already in one / if request was already sent (there is currently no way for clients to cancel a join request)")
+	}
+	c.RoomState.PendingJoin = code
+	c.Logger.Info("Attempting room join...")
+	c.WriteMessage(&metroserver.JoinRoomPayload{RoomCode: code, Username: c.Username})
+	return nil
+}
+
+func (c *Client) CreateRoom() (err error) {
+	c.Logger.Info("Attempting room creation...")
+	c.WriteMessage(&metroserver.CreateRoomPayload{
+		Username: c.Username,
+	})
+	c.Logger.Info("Room create payload sent")
+	return nil
+}
+
+func (c *Client) LeaveRoom() (err error) {
+	c.Logger.Info("Attempting to leave room")
+	/*if c.RoomState.RoomCode == "" {
+		return fmt.Errorf("when leaving room : this client isn't in any room")
+	}*/
+
+	c.WriteMessage(&metroserver.LeaveRoomPayload{})
+	c.RoomState.QueueTitle = ""
+	c.RoomState.RoomCode = ""
+
+	c.UserID = ""
+	c.SessionToken.Store("")
+	c.Logger.Info("Left room")
+	return nil
+}
+
+func (c *Client) RequestSync() (err error) {
+	c.Logger.Debug("Requesting Sync")
+	v, err := c.codec.Encode(metroserver.MsgTypeRequestSync, nil)
+	c.Send <- v
+
+	return err
+}

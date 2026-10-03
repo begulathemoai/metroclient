@@ -12,6 +12,9 @@ func fromProtoUser(user *pb.UserInfo) (out UserInfo) {
 }
 
 func fromProtoTrack(track *pb.TrackInfo) (out *TrackInfo) {
+	if track == nil {
+		return nil
+	}
 	return &TrackInfo{ID: track.Id, Title: track.Title, Artist: track.Artist, Album: track.Album, Duration: track.Duration, Thumbnail: track.Thumbnail, SuggestedBy: track.SuggestedBy}
 }
 
@@ -40,6 +43,40 @@ func fromProtoState(state any) (out any) {
 // fromProtoMessage converts protobuf messages to Go structs
 func fromProtoMessage(msgType string, data []byte) (any, error) {
 	switch msgType {
+	case MsgTypeJoinRejected:
+		var pbb pb.JoinRejectedPayload
+		if err := proto.Unmarshal(data, &pbb); err != nil {
+			return nil, err
+		}
+		return &JoinRejectedPayload{Reason: pbb.Reason}, nil
+	case MsgTypeJoinRequest:
+		var pbb pb.JoinRequestPayload
+		if err := proto.Unmarshal(data, &pbb); err != nil {
+			return nil, err
+		}
+		return &JoinRequestPayload{UserID: pbb.UserId, Username: pbb.Username}, nil
+	case MsgTypeSyncState:
+		var pbb pb.SyncStatePayload
+		payload := &SyncStatePayload{CurrentTrack: fromProtoTrack(pbb.CurrentTrack), IsPlaying: pbb.IsPlaying, Position: pbb.Position, LastUpdate: pbb.Position, Volume: float64(pbb.Volume)}
+		if err := proto.Unmarshal(data, &pbb); err != nil {
+			return nil, err
+		}
+		if pbb.Queue != nil {
+			if len(pbb.Queue) > MaxQueueInputSize {
+				return nil, fmt.Errorf("queue has more than %d entries", MaxQueueInputSize)
+			}
+			payload.Queue = make([]TrackInfo, len(pbb.Queue))
+			for i, track := range pbb.Queue {
+				payload.Queue[i] = *protoToTrackInfo(track)
+			}
+		}
+		return payload, nil
+	case MsgTypeRoomCreated:
+		var pbb pb.RoomCreatedPayload
+		if err := proto.Unmarshal(data, &pbb); err != nil {
+			return nil, err
+		}
+		return &RoomCreatedPayload{UserID: pbb.UserId, RoomCode: pbb.RoomCode, SessionToken: pbb.SessionToken}, nil
 	case MsgTypeError:
 		var pbb pb.ErrorPayload
 		if err := proto.Unmarshal(data, &pbb); err != nil {
@@ -212,7 +249,7 @@ func fromProtoMessage(msgType string, data []byte) (any, error) {
 }
 
 // decodePayload decodes a protobuf payload into the target interface
-func DecodePayload(payloadBytes []byte, msgType string, target interface{}) error {
+func DecodePayload(payloadBytes []byte, msgType string, target any) error {
 	// Use fromProtoMessage to convert protobuf to Go struct
 	payload, err := fromProtoMessage(msgType, payloadBytes)
 	if err != nil {
@@ -327,6 +364,30 @@ func DecodePayload(payloadBytes []byte, msgType string, target interface{}) erro
 		p, ok := payload.(*UserLeftPayload)
 		if !ok {
 			return fmt.Errorf("payload type mismatch: expected UserLeftPayload, got %T", payload)
+		}
+		*t = *p
+	case *RoomCreatedPayload:
+		p, ok := payload.(*RoomCreatedPayload)
+		if !ok {
+			return fmt.Errorf("payload type mismatch: expected RoomCreatedPayload, got %T", payload)
+		}
+		*t = *p
+	case *SyncStatePayload:
+		p, ok := payload.(*SyncStatePayload)
+		if !ok {
+			return fmt.Errorf("payload type mismatch: expected SyncStatePayload, got %T", payload)
+		}
+		*t = *p
+	case *JoinRequestPayload:
+		p, ok := payload.(*JoinRequestPayload)
+		if !ok {
+			return fmt.Errorf("payload type mismatch: expected JoinRequestPayload, got %T", payload)
+		}
+		*t = *p
+	case *JoinRejectedPayload:
+		p, ok := payload.(*JoinRejectedPayload)
+		if !ok {
+			return fmt.Errorf("payload type mismatch: expected JoinRejectedPayload, got %T", payload)
 		}
 		*t = *p
 	default:

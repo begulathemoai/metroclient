@@ -9,7 +9,7 @@ import (
 
 	"bufio"
 
-	"github.com/begulathemoai/metroclient/internal/client"
+	"github.com/begulathemoai/metroclient/pkg/client"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -36,6 +36,8 @@ func process_input(input string, c *client.Client) {
 	tokens := strings.Split(input, " ")
 	counter := 1
 	switch strings.ToLower(tokens[0]) {
+	case "create":
+		c.CreateRoom()
 	case "join":
 		if len(tokens) < 2 {
 			c.Logger.Error("Unknown input", zap.String("input", input))
@@ -47,9 +49,22 @@ func process_input(input string, c *client.Client) {
 		if err != nil {
 			c.Logger.Error("An error was encountered", zap.Error(err))
 		}
+	case "sync":
+		fmt.Println("Requesting sync...")
+		c.RequestSync()
+	case "accept":
+		for id, user := range c.RoomState.PendingJoinRequests {
+			fmt.Printf("Accepting request from %v\n", user)
+			c.AcceptJoinRequest(id)
+		}
 	case "info":
 		if c.RoomState == nil {
-			c.Logger.Info("You are not currently in a room.")
+			if c.RoomState.RoomCode == "" {
+
+				c.Logger.Info("You are not currently in a room.")
+			} else {
+				c.Logger.Info(fmt.Sprintf("Current room : %v . No other info to display.", c.RoomState.RoomCode))
+			}
 		} else {
 			out := strings.Builder{}
 			out.WriteString("Room state for room ")
@@ -64,16 +79,20 @@ func process_input(input string, c *client.Client) {
 				}
 			}
 			out.WriteString("There are currently ")
-			fmt.Fprintf(&out, "%v (%v)", len(c.RoomState.Users), ucount)
+			fmt.Fprintf(&out, "%v", ucount)
 			out.WriteString(" users in this room.\nCurrent queue : ")
-			out.WriteString(c.QueueTitle)
+			out.WriteString(c.RoomState.QueueTitle)
 			out.WriteString("\n")
 			if c.RoomState.CurrentTrack != nil {
 				out.WriteString("Now Playing : ")
 				out.WriteString(c.RoomState.CurrentTrack.Title)
-				fmt.Fprintf(&out, " (%.2f%%)\n", float64(c.RoomState.Position)/float64(c.RoomState.CurrentTrack.Duration))
+				fmt.Fprintf(&out, " (%.2f%%)\n", float64(c.RoomState.Position)/float64(c.RoomState.CurrentTrack.Duration)*100)
 			}
-
+			out.WriteString("Latest update was at ")
+			out.WriteString(time.UnixMilli(c.RoomState.LastUpdate).Format(time.TimeOnly))
+			out.WriteString(" (current time is ")
+			out.WriteString(time.Now().Format(time.TimeOnly))
+			out.WriteString(")\n")
 			for _, user := range c.RoomState.Users {
 				if user.Username == "" {
 					continue
@@ -93,8 +112,9 @@ func process_input(input string, c *client.Client) {
 
 func main() {
 	config := zap.NewDevelopmentConfig()
+
 	config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	config.Level.SetLevel(zapcore.InfoLevel)
+	config.Level.SetLevel(zapcore.DebugLevel)
 	logger, err := config.Build()
 
 	if err != nil {

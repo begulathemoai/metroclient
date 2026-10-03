@@ -504,7 +504,7 @@ func roomStateToProto(r *RoomState) *pb.RoomState {
 		}
 	}
 
-	if r.Queue != nil && len(r.Queue) > 0 {
+	if len(r.Queue) > 0 {
 		pbState.Queue = make([]*pb.TrackInfo, len(r.Queue))
 		for i, track := range r.Queue {
 			pbState.Queue[i] = trackInfoToProto(&track)
