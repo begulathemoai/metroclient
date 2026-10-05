@@ -1,4 +1,4 @@
-package client
+package metroclient
 
 import (
 	"fmt"
@@ -24,7 +24,25 @@ type RoomState struct {
 	PendingJoinRequests map[string]string
 }
 
-func (r *RoomState) UpdateFromMetroserverRoomState(msrs *metroserver.RoomState) {
+func (r *RoomState) clear() {
+	r.PendingJoin = ""
+	r.RoomCode = ""
+	r.HostID = ""
+	r.Users = make([]metroserver.UserInfo, 0)
+	r.Queue = make([]metroserver.TrackInfo, 0)
+	r.QueueTitle = ""
+	r.CurrentTrack = nil
+	r.IsPlaying = false
+	r.IsHost = false
+	r.Position = 0
+	r.LastUpdate = 0
+	r.Volume = 0
+	r.Revision = 0
+	r.PendingJoinRequests = make(map[string]string)
+
+}
+
+func (r *RoomState) updateFromMetroserverRoomState(msrs *metroserver.RoomState) {
 	r.RoomCode = msrs.RoomCode
 	r.HostID = msrs.HostID
 	r.Users = msrs.Users
@@ -37,7 +55,7 @@ func (r *RoomState) UpdateFromMetroserverRoomState(msrs *metroserver.RoomState) 
 	r.Revision = msrs.Revision
 }
 
-func (r *RoomState) ToMetroserverRoomState() (msrs *metroserver.RoomState) {
+func (r *RoomState) toMetroserverRoomState() (msrs *metroserver.RoomState) {
 	msrs = &metroserver.RoomState{
 		RoomCode:     r.RoomCode,
 		HostID:       r.HostID,
@@ -60,7 +78,7 @@ func (c *Client) AcceptJoinRequest(UserID string) (err error) {
 	}
 
 	c.Logger.Info("Accepting join request", zap.String("UserID", UserID), zap.String("Username", c.RoomState.PendingJoinRequests[UserID]))
-	err = c.WriteMessage(&metroserver.ApproveJoinPayload{UserID: UserID})
+	err = c.WriteMessage(metroserver.MsgTypeApproveJoin, &metroserver.ApproveJoinPayload{UserID: UserID})
 	if err != nil {
 		return fmt.Errorf("when accepting join request : %w", err)
 	}
@@ -74,13 +92,13 @@ func (c *Client) JoinRoom(code string) (err error) {
 	}
 	c.RoomState.PendingJoin = code
 	c.Logger.Info("Attempting room join...")
-	c.WriteMessage(&metroserver.JoinRoomPayload{RoomCode: code, Username: c.Username})
+	c.WriteMessage(metroserver.MsgTypeJoinRoom, &metroserver.JoinRoomPayload{RoomCode: code, Username: c.Username})
 	return nil
 }
 
 func (c *Client) CreateRoom() (err error) {
 	c.Logger.Info("Attempting room creation...")
-	c.WriteMessage(&metroserver.CreateRoomPayload{
+	c.WriteMessage(metroserver.MsgTypeCreateRoom, &metroserver.CreateRoomPayload{
 		Username: c.Username,
 	})
 	c.Logger.Info("Room create payload sent")
@@ -93,10 +111,8 @@ func (c *Client) LeaveRoom() (err error) {
 		return fmt.Errorf("when leaving room : this client isn't in any room")
 	}*/
 
-	c.WriteMessage(&metroserver.LeaveRoomPayload{})
-	c.RoomState.QueueTitle = ""
-	c.RoomState.RoomCode = ""
-
+	c.WriteMessage(metroserver.MsgTypeLeaveRoom, nil)
+	c.RoomState.clear()
 	c.UserID = ""
 	c.SessionToken.Store("")
 	c.Logger.Info("Left room")
@@ -105,8 +121,7 @@ func (c *Client) LeaveRoom() (err error) {
 
 func (c *Client) RequestSync() (err error) {
 	c.Logger.Debug("Requesting Sync")
-	v, err := c.codec.Encode(metroserver.MsgTypeRequestSync, nil)
-	c.Send <- v
+	c.WriteMessage(metroserver.MsgTypeRequestSync, nil)
 
 	return err
 }

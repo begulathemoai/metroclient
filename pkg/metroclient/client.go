@@ -1,4 +1,4 @@
-package client
+package metroclient
 
 import (
 	"fmt"
@@ -29,7 +29,7 @@ type Client struct {
 	Logger              *zap.Logger
 	CompressionEnabled  bool
 	awaits              map[chan int]string
-	notificationHandler func(string, []byte)
+	notificationHandler func(*any)
 }
 
 func NewClient(url string, logger *zap.Logger) (c *Client, err error) {
@@ -59,7 +59,7 @@ func NewClient(url string, logger *zap.Logger) (c *Client, err error) {
 	c.RoomState = &RoomState{Users: make([]metroserver.UserInfo, 0), Queue: make([]metroserver.TrackInfo, 0), PendingJoinRequests: make(map[string]string)}
 	go c.writePump()
 	go c.readPump()
-	c.WriteMessage(&metroserver.ClientCapabilitiesPayload{
+	c.WriteMessage(metroserver.MsgTypeClientCapabilities, &metroserver.ClientCapabilitiesPayload{
 		SupportsProtobuf:    true,
 		SupportsCompression: true,
 		ClientVersion:       "1",
@@ -67,29 +67,13 @@ func NewClient(url string, logger *zap.Logger) (c *Client, err error) {
 	return c, nil
 }
 
-func (c *Client) SetNotificationHandler(h func(string, []byte)) {
+func (c *Client) SetNotificationHandler(h func(*any)) {
 	c.notificationHandler = h
 }
 
-func (c *Client) WriteMessage(in any) (err error) {
-	c.Logger.Debug("Sending message", zap.String("type", fmt.Sprintf("%T", in)), zap.Any("message", in))
-	var T string
-	switch in.(type) {
-	case *metroserver.JoinRoomPayload:
-		T = metroserver.MsgTypeJoinRoom
-	case *metroserver.ClientCapabilitiesPayload:
-		T = metroserver.MsgTypeClientCapabilities
-	case *metroserver.LeaveRoomPayload:
-		T = metroserver.MsgTypeLeaveRoom
-	case *metroserver.CreateRoomPayload:
-		T = metroserver.MsgTypeCreateRoom
-	case *metroserver.ApproveJoinPayload:
-		T = metroserver.MsgTypeApproveJoin
-	default:
-		c.Logger.Error("couldn't send unhandled message type")
-		return fmt.Errorf("couldn't send unhandled message type %T", in)
-	}
-	v, _ := c.codec.Encode(T, in)
+func (c *Client) WriteMessage(t string, in any) (err error) {
+	c.Logger.Debug("Sending message", zap.String("type", fmt.Sprintf("%v", t)), zap.Any("message", in))
+	v, _ := c.codec.Encode(t, in)
 	c.Send <- v
 
 	return nil
@@ -146,7 +130,6 @@ func (c *Client) readPump() {
 		c.Logger.Debug("Failed to set read deadline", zap.Error(err))
 	}
 	c.Conn.SetPingHandler(func(string) error {
-		c.Logger.Debug("Received ping; now ponging")
 		c.Conn.WriteControl(websocket.PongMessage, nil, time.Now().Add(WriteTimeout))
 		if err := c.Conn.SetReadDeadline(time.Now().Add(ReadTimeout)); err != nil {
 			c.Logger.Debug("Failed to set read deadline in ping handler", zap.Error(err))
@@ -172,58 +155,100 @@ func (c *Client) readPump() {
 	}
 }
 
-func (c *Client) handleMessage(message []byte) {
-	//t, d, e := c.codec.Decode(message)
+func (c *Client) processRawMessage(message []byte) any {
 	msgType, payloadBytes, err := c.codec.Decode(message)
 	if err != nil {
 		c.Logger.Info("Received invalid message")
-		return
+		return nil
 	}
 
 	if msgType == "" {
 		c.Logger.Info("Received no message type")
-		return
+		return nil
 	}
 	for ch, t := range c.awaits {
 		if t == msgType {
 			ch <- 1
 		}
 	}
-	if c.notificationHandler != nil {
-		c.notificationHandler(msgType, payloadBytes)
-	}
+	var i any
 	switch msgType {
-	// the server sent us an error
-	case metroserver.MsgTypeError:
-		c.handleError(payloadBytes)
-	// our join request was approved by the server
 	case metroserver.MsgTypeJoinApproved:
-		c.handleJoinApproved(payloadBytes)
-
-	// server capabilities (protobuf, compression)
+		i = &metroserver.JoinApprovedPayload{}
+		err = metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeJoinApproved, i)
+	case metroserver.MsgTypeError:
+		i = &metroserver.ErrorPayload{}
+		err = metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeError, i)
 	case metroserver.MsgTypeServerCapabilities:
-		c.handleServerCapabilities(payloadBytes)
-	// playback event/action
+		i = &metroserver.ServerCapabilitiesPayload{}
+		err = metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeServerCapabilities, i)
 	case metroserver.MsgTypeSyncPlayback:
-		c.handlePlaybackSync(payloadBytes)
-	// a user left the room
+		i = &metroserver.PlaybackActionPayload{}
+		err = metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeSyncPlayback, i)
+	case metroserver.MsgTypeUserJoined:
+		i = &metroserver.UserJoinedPayload{}
+		err = metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeUserJoined, i)
 	case metroserver.MsgTypeUserLeft:
-		c.handleUserLeft(payloadBytes)
-	// the server created us a room
+		i = &metroserver.UserLeftPayload{}
+		err = metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeUserLeft, i)
 	case metroserver.MsgTypeRoomCreated:
-		c.handleRoomCreated(payloadBytes)
-	// the server sent us a snapshot of the room state
+		i = &metroserver.RoomCreatedPayload{}
+		err = metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeRoomCreated, i)
 	case metroserver.MsgTypeSyncState:
-		c.handleStateSync(payloadBytes)
-	// someone sent us a join request
+		i = &metroserver.SyncStatePayload{}
+		err = metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeSyncState, i)
 	case metroserver.MsgTypeJoinRequest:
-		c.handleJoinRequest(payloadBytes)
+		i = &metroserver.JoinRequestPayload{}
+		err = metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeJoinRequest, i)
 	case metroserver.MsgTypeJoinRejected:
-		c.handleJoinRejected(payloadBytes)
-	default:
-		c.Logger.Info("Received message of unhandled type", zap.String("type", msgType))
+		i = &metroserver.JoinRejectedPayload{}
+		err = metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeJoinRejected, i)
 	}
+	if err != nil {
+		c.Logger.Error("error while decoding", zap.Error(err))
+		return nil
+	}
+	return i
 
+}
+
+func (c *Client) handleMessage(message []byte) {
+	msg := c.processRawMessage(message)
+	switch msg := msg.(type) {
+	// the server sent us an error
+	case metroserver.ErrorPayload:
+		c.handleError(&msg)
+	// our join request was approved by the server
+	case metroserver.JoinApprovedPayload:
+		c.handleJoinApproved(&msg)
+	// server capabilities (protobuf, compression)
+	case metroserver.ServerCapabilitiesPayload:
+		c.handleServerCapabilities(&msg)
+	// playback event/action
+	case metroserver.PlaybackActionPayload:
+		c.handlePlaybackSync(&msg)
+	// a user left the room
+	case metroserver.UserJoinedPayload:
+		c.handleUserJoined(&msg)
+	case metroserver.UserLeftPayload:
+		c.handleUserLeft(&msg)
+	// the server created us a room
+	case metroserver.RoomCreatedPayload:
+		c.handleRoomCreated(&msg)
+	// the server sent us a snapshot of the room state
+	case metroserver.SyncStatePayload:
+		c.handleStateSync(&msg)
+	// someone sent us a join request
+	case metroserver.JoinRequestPayload:
+		c.handleJoinRequest(&msg)
+	case metroserver.JoinRejectedPayload:
+		c.handleJoinRejected(&msg)
+	default:
+		c.Logger.Info("Received message of unhandled type", zap.Any("message", msg))
+	}
+	if c.notificationHandler != nil {
+		c.notificationHandler(&msg)
+	}
 }
 
 // returns true if the message was received first, false if the timeout occured first

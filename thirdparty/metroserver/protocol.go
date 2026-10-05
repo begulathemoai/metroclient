@@ -247,10 +247,6 @@ type KickUserPayload struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// LeaveRoomPayload is sent to the server when the client requests to leave the room (not part of the og payloads)
-type LeaveRoomPayload struct {
-}
-
 // TransferHostPayload is for transferring host role to another user
 type TransferHostPayload struct {
 	NewHostID string `json:"new_host_id"`

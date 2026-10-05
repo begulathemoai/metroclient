@@ -1,68 +1,37 @@
-package client
+package metroclient
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/begulathemoai/metroclient/thirdparty/metroserver"
 	"go.uber.org/zap"
 )
 
-func (c *Client) handleError(payloadBytes []byte) {
-	i := &metroserver.ErrorPayload{}
-	err := metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeError, i)
-	if err != nil {
-		fmt.Printf("error while decoding : %v", err)
-		return
-	}
-
+func (c *Client) handleError(i *metroserver.ErrorPayload) {
 	c.Logger.Info("Server threw error", zap.String("code", i.Code), zap.String("message", i.Message))
 }
 
-func (c *Client) handleJoinApproved(payloadBytes []byte) {
-	i := &metroserver.JoinApprovedPayload{}
-	err := metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeJoinApproved, i)
-	if err != nil {
-		c.Logger.Error("error while decoding", zap.Error(err))
-		return
-	}
+func (c *Client) handleJoinApproved(i *metroserver.JoinApprovedPayload) {
+
 	c.UserID = i.UserID
 	c.RoomState.PendingJoin = ""
-	c.RoomState.UpdateFromMetroserverRoomState(i.State)
+	c.RoomState.updateFromMetroserverRoomState(i.State)
 	c.RoomState.IsHost = false
 	c.SessionToken.Store(i.SessionToken)
 	c.Logger.Info("Joined room successfully", zap.String("room_code", i.RoomCode), zap.String("token", i.SessionToken), zap.String("user_id", i.UserID))
 }
 
-func (c *Client) handleJoinRejected(payloadBytes []byte) {
-	i := &metroserver.JoinRejectedPayload{}
-	err := metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeJoinRejected, i)
-	if err != nil {
-		c.Logger.Error("error while decoding", zap.Error(err))
-		return
-	}
+func (c *Client) handleJoinRejected(i *metroserver.JoinRejectedPayload) {
 	c.Logger.Info("Join request was rejected", zap.String("RoomCode", c.RoomState.PendingJoin))
 	c.RoomState.PendingJoin = ""
 }
 
-func (c *Client) handleServerCapabilities(payloadBytes []byte) {
-	i := &metroserver.ServerCapabilitiesPayload{}
-	err := metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeServerCapabilities, i)
-	if err != nil {
-		c.Logger.Error("error while decoding", zap.Error(err))
-		return
-	}
+func (c *Client) handleServerCapabilities(i *metroserver.ServerCapabilitiesPayload) {
 	c.codec.SetCompressionEnabled(i.SupportsCompression)
 	c.Logger.Info("Got server capabilities", zap.Bool("supports_compression", i.SupportsCompression), zap.Bool("supports_protobuf", i.SupportsProtobuf), zap.String("server_version", i.ServerVersion))
 }
 
-func (c *Client) handlePlaybackSync(payloadBytes []byte) {
-	i := &metroserver.PlaybackActionPayload{}
-	err := metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeSyncPlayback, i)
-	if err != nil {
-		c.Logger.Error("error while decoding", zap.Error(err))
-		return
-	}
+func (c *Client) handlePlaybackSync(i *metroserver.PlaybackActionPayload) {
 	c.RoomState.Revision = i.Revision
 	c.RoomState.QueueTitle = i.QueueTitle
 	c.RoomState.LastUpdate = time.Now().UnixMilli()
@@ -90,14 +59,12 @@ func (c *Client) handlePlaybackSync(payloadBytes []byte) {
 	}
 }
 
-func (c *Client) handleUserLeft(payloadBytes []byte) {
-	c.Logger.Debug("Received user_left")
-	i := &metroserver.UserLeftPayload{}
-	err := metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeSyncPlayback, i)
-	if err != nil {
-		c.Logger.Error("error while decoding", zap.Error(err))
-		return
-	}
+func (c *Client) handleUserJoined(i *metroserver.UserJoinedPayload) {
+	// educated guesses : user just joined so they must not be the host and must be connected
+	c.RoomState.Users = append(c.RoomState.Users, metroserver.UserInfo{UserID: i.UserID, Username: i.Username, IsHost: false, IsConnected: true})
+}
+
+func (c *Client) handleUserLeft(i *metroserver.UserLeftPayload) {
 	idx := 0
 	for id, u := range c.RoomState.Users {
 		if u.UserID == i.UserID {
@@ -109,29 +76,18 @@ func (c *Client) handleUserLeft(payloadBytes []byte) {
 	c.RoomState.Users = c.RoomState.Users[:len(c.RoomState.Users)-1]
 }
 
-func (c *Client) handleRoomCreated(payloadBytes []byte) {
-	c.Logger.Debug("Received room_created")
-	i := &metroserver.RoomCreatedPayload{}
-	err := metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeRoomCreated, i)
-	if err != nil {
-		c.Logger.Error("error while decoding", zap.Error(err))
-		return
-	}
+func (c *Client) handleRoomCreated(i *metroserver.RoomCreatedPayload) {
 	c.RoomState.RoomCode = i.RoomCode
 	c.RoomState.IsHost = true
+	c.RoomState.Users = make([]metroserver.UserInfo, 1)
+	c.RoomState.Users[0] = metroserver.UserInfo{UserID: i.UserID, Username: c.Username, IsHost: true, IsConnected: true}
 	c.UserID = i.UserID
 	c.SessionToken.Store(i.SessionToken)
 	c.Logger.Info("Created room", zap.String("RoomCode", i.RoomCode))
 	c.RequestSync()
 }
 
-func (c *Client) handleStateSync(payloadBytes []byte) {
-	i := &metroserver.SyncStatePayload{}
-	err := metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeSyncState, i)
-	if err != nil {
-		c.Logger.Error("error while decoding", zap.Error(err))
-		return
-	}
+func (c *Client) handleStateSync(i *metroserver.SyncStatePayload) {
 	c.RoomState.CurrentTrack = i.CurrentTrack
 	c.RoomState.IsPlaying = i.IsPlaying
 	c.RoomState.Revision = i.Revision
@@ -141,13 +97,7 @@ func (c *Client) handleStateSync(payloadBytes []byte) {
 	c.RoomState.Volume = i.Volume
 }
 
-func (c *Client) handleJoinRequest(payloadBytes []byte) {
-	i := &metroserver.JoinRequestPayload{}
-	err := metroserver.DecodePayload(payloadBytes, metroserver.MsgTypeJoinRequest, i)
-	if err != nil {
-		c.Logger.Error("error while decoding", zap.Error(err))
-		return
-	}
+func (c *Client) handleJoinRequest(i *metroserver.JoinRequestPayload) {
 	c.Logger.Info("Received join request", zap.String("UserID", i.UserID), zap.String("Username", i.Username))
 	c.RoomState.PendingJoinRequests[i.UserID] = i.Username
 }

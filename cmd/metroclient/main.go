@@ -9,7 +9,7 @@ import (
 
 	"bufio"
 
-	"github.com/begulathemoai/metroclient/pkg/client"
+	"github.com/begulathemoai/metroclient/pkg/metroclient"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -32,7 +32,7 @@ func uinput_loop(ch *chan string) {
 
 }
 
-func process_input(input string, c *client.Client) {
+func process_input(input string, c *metroclient.Client) {
 	tokens := strings.Split(input, " ")
 	counter := 1
 	switch strings.ToLower(tokens[0]) {
@@ -58,13 +58,9 @@ func process_input(input string, c *client.Client) {
 			c.AcceptJoinRequest(id)
 		}
 	case "info":
-		if c.RoomState == nil {
-			if c.RoomState.RoomCode == "" {
 
-				c.Logger.Info("You are not currently in a room.")
-			} else {
-				c.Logger.Info(fmt.Sprintf("Current room : %v . No other info to display.", c.RoomState.RoomCode))
-			}
+		if c.RoomState.RoomCode == "" {
+			c.Logger.Info("You are not currently in a room.")
 		} else {
 			out := strings.Builder{}
 			out.WriteString("Room state for room ")
@@ -123,7 +119,7 @@ func main() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
-	c, err := client.NewClient("wss://metroserverx.begulathemoai.dev/ws", logger)
+	c, err := metroclient.NewClient("wss://metroserverx.begulathemoai.dev/ws", logger)
 	if err != nil {
 		logger.Fatal("error : %v", zap.Error(err))
 	}

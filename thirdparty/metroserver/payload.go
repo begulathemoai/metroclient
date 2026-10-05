@@ -43,6 +43,12 @@ func fromProtoState(state any) (out any) {
 // fromProtoMessage converts protobuf messages to Go structs
 func fromProtoMessage(msgType string, data []byte) (any, error) {
 	switch msgType {
+	case MsgTypeUserJoined:
+		var pbb pb.UserJoinedPayload
+		if err := proto.Unmarshal(data, &pbb); err != nil {
+			return nil, err
+		}
+		return &UserJoinedPayload{UserID: pbb.UserId, Username: pbb.Username}, nil
 	case MsgTypeJoinRejected:
 		var pbb pb.JoinRejectedPayload
 		if err := proto.Unmarshal(data, &pbb); err != nil {
@@ -388,6 +394,12 @@ func DecodePayload(payloadBytes []byte, msgType string, target any) error {
 		p, ok := payload.(*JoinRejectedPayload)
 		if !ok {
 			return fmt.Errorf("payload type mismatch: expected JoinRejectedPayload, got %T", payload)
+		}
+		*t = *p
+	case *UserJoinedPayload:
+		p, ok := payload.(*UserJoinedPayload)
+		if !ok {
+			return fmt.Errorf("payload type mismatch: expected UserJoinedPayload, got %T", payload)
 		}
 		*t = *p
 	default:
