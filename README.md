@@ -16,8 +16,8 @@ quite a bit of code was taken from [metroserver](https://github.com/MetrolistGro
 - [x] `JoinRejectedPayload` (sent to the user when they are rejected)<br>
 - [x] `UserJoinedPayload` (sent when a user joins the room)<br>
 - [x] `UserLeftPayload` (sent when a user leaves the room)<br>
-- [ ] `KickedPayload` (sent to the user when they are kicked)<br>
-- [ ] `HostChangedPayload` (sent when the host changes)<br>
+- [x] `KickedPayload` (sent to the user when they are kicked)<br>
+- [x] `HostChangedPayload` (sent when the host changes)<br>
 - [ ] `ReconnectedPayload` (sent when successfully reconnected)<br>
 - [ ] `UserReconnectedPayload` (sent to other users when someone reconnects)<br>
 - [ ] `UserDisconnectedPayload` (sent when a user temporarily disconnects)<br>

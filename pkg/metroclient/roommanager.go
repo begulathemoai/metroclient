@@ -2,6 +2,7 @@ package metroclient
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/begulathemoai/metroclient/thirdparty/metroserver"
 	"go.uber.org/zap"
@@ -13,6 +14,7 @@ type RoomState struct {
 	HostID              string
 	Users               []metroserver.UserInfo
 	Queue               []metroserver.TrackInfo
+	mu                  sync.Mutex
 	QueueTitle          string
 	CurrentTrack        *metroserver.TrackInfo
 	IsPlaying           bool
@@ -39,7 +41,6 @@ func (r *RoomState) clear() {
 	r.Volume = 0
 	r.Revision = 0
 	r.PendingJoinRequests = make(map[string]string)
-
 }
 
 func (r *RoomState) updateFromMetroserverRoomState(msrs *metroserver.RoomState) {
@@ -72,6 +73,8 @@ func (r *RoomState) toMetroserverRoomState() (msrs *metroserver.RoomState) {
 }
 
 func (c *Client) AcceptJoinRequest(UserID string) (err error) {
+	c.RoomState.mu.Lock()
+	defer c.RoomState.mu.Unlock()
 	_, ok := c.RoomState.PendingJoinRequests[UserID]
 	if !ok {
 		return fmt.Errorf("when accepting join request : no user with this id has requested to join")
@@ -87,6 +90,8 @@ func (c *Client) AcceptJoinRequest(UserID string) (err error) {
 }
 
 func (c *Client) JoinRoom(code string) (err error) {
+	c.RoomState.mu.Lock()
+	defer c.RoomState.mu.Unlock()
 	if c.RoomState.RoomCode != "" || c.RoomState.PendingJoin != "" {
 		return fmt.Errorf("when joining room : cannot join room if already in one / if request was already sent (there is currently no way for clients to cancel a join request)")
 	}
@@ -97,6 +102,8 @@ func (c *Client) JoinRoom(code string) (err error) {
 }
 
 func (c *Client) CreateRoom() (err error) {
+	c.RoomState.mu.Lock()
+	defer c.RoomState.mu.Unlock()
 	c.Logger.Info("Attempting room creation...")
 	c.WriteMessage(metroserver.MsgTypeCreateRoom, &metroserver.CreateRoomPayload{
 		Username: c.Username,

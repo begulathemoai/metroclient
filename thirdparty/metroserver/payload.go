@@ -43,6 +43,18 @@ func fromProtoState(state any) (out any) {
 // fromProtoMessage converts protobuf messages to Go structs
 func fromProtoMessage(msgType string, data []byte) (any, error) {
 	switch msgType {
+	case MsgTypeHostChanged:
+		var pbb pb.HostChangedPayload
+		if err := proto.Unmarshal(data, &pbb); err != nil {
+			return nil, err
+		}
+		return &HostChangedPayload{NewHostID: pbb.NewHostId, NewHostName: pbb.NewHostName}, nil
+	case MsgTypeKicked:
+		var pbb pb.KickedPayload
+		if err := proto.Unmarshal(data, &pbb); err != nil {
+			return nil, err
+		}
+		return &KickedPayload{Reason: pbb.Reason}, nil
 	case MsgTypeUserJoined:
 		var pbb pb.UserJoinedPayload
 		if err := proto.Unmarshal(data, &pbb); err != nil {
@@ -312,6 +324,12 @@ func DecodePayload(payloadBytes []byte, msgType string, target any) error {
 			return fmt.Errorf("payload type mismatch: expected KickUserPayload, got %T", payload)
 		}
 		*t = *p
+	case *KickedPayload:
+		p, ok := payload.(*KickedPayload)
+		if !ok {
+			return fmt.Errorf("payload type mismatch: expected KickedPayload, got %T", payload)
+		}
+		*t = *p
 	case *SuggestTrackPayload:
 		p, ok := payload.(*SuggestTrackPayload)
 		if !ok {
@@ -400,6 +418,12 @@ func DecodePayload(payloadBytes []byte, msgType string, target any) error {
 		p, ok := payload.(*UserJoinedPayload)
 		if !ok {
 			return fmt.Errorf("payload type mismatch: expected UserJoinedPayload, got %T", payload)
+		}
+		*t = *p
+	case *HostChangedPayload:
+		p, ok := payload.(*HostChangedPayload)
+		if !ok {
+			return fmt.Errorf("payload type mismatch: expected HostChangedPayload, got %T", payload)
 		}
 		*t = *p
 	default:
