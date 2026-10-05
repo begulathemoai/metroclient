@@ -23,7 +23,7 @@ quite a bit of code was taken from [metroserver](https://github.com/MetrolistGro
 - [ ] `UserDisconnectedPayload` (sent when a user temporarily disconnects)<br>
 
 ### Playback
-- [-] `PlaybackActionPayload` (for playback control actions)<br>
+- [ ] `PlaybackActionPayload` (for playback control actions)<br>
 - [x] `SyncStatePayload` (sent to a guest when they request current playback state)<br>
 
 ### Song requests
