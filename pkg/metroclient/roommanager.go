@@ -132,3 +132,14 @@ func (c *Client) RequestSync() (err error) {
 
 	return err
 }
+
+func (c *Client) SuggestSong(track *metroserver.TrackInfo) (err error) {
+	c.Logger.Debug("Suggesting Song")
+	err = c.WriteMessage(metroserver.MsgTypeSuggestTrack, &metroserver.SuggestTrackPayload{
+		TrackInfo: track,
+	})
+	if err != nil {
+		err = fmt.Errorf("when suggesting song : %w", err)
+	}
+	return err
+}

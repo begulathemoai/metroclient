@@ -10,6 +10,7 @@ import (
 	"bufio"
 
 	"github.com/begulathemoai/metroclient/pkg/metroclient"
+	"github.com/begulathemoai/metroclient/thirdparty/metroserver"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -40,7 +41,7 @@ func process_input(input string, c *metroclient.Client) {
 		c.CreateRoom()
 	case "join":
 		if len(tokens) < 2 {
-			c.Logger.Error("Unknown input", zap.String("input", input))
+			c.Logger.Error("Bad input", zap.String("input", input))
 			return
 		}
 		c.JoinRoom(tokens[counter])
@@ -57,6 +58,12 @@ func process_input(input string, c *metroclient.Client) {
 			fmt.Printf("Accepting request from %v\n", user)
 			c.AcceptJoinRequest(id)
 		}
+	case "suggest":
+		if len(tokens) < 3 {
+			c.Logger.Error("Bad input", zap.String("input", input))
+			return
+		}
+		c.SuggestSong(&metroserver.TrackInfo{ID: tokens[counter], Title: strings.Join(tokens[2:], " ")})
 	case "info":
 
 		if c.RoomState.RoomCode == "" {
