@@ -1,8 +1,8 @@
 # metroclient
 
 a client written in go that connects to metrolist's listen together<br>
-for now it cannot really be used as a module and is hardcoded to connect to my selfhosted metroserver instance<br>
-input a room's code in stdin to connect to it<br>
+it can be used as a package by importing `github.com/begulathemoai/metroclient/pkg/metroclient` (better structure Soon™) or just used standalone with the provided cli, which is hardcoded to connect to my instance (read the code to see the available commands)<br>
+this client can't create rooms on the official metroserver instance because its user agent doesn't match the allowed ones (it's `dev.begulathemoai.metroclient`)<br>
 <br>
 quite a bit of code was taken from [metroserver](https://github.com/MetrolistGroup/metroserver)
 
